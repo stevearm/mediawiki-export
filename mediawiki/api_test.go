@@ -1,6 +1,7 @@
 package mediawiki
 
 import (
+	"io/ioutil"
 	"net/http"
 	"testing"
 
@@ -94,6 +95,48 @@ func TestListTitles(t *testing.T) {
 	requests := server.Requests()
 	request := <-requests
 	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/api.php?format=json&action=query&list=allpages&aplimit=max" {
+		t.Errorf("Bad call: %v", request)
+	}
+	if len(requests) != 0 {
+		t.Errorf("Found extra requests: %v", len(requests))
+	}
+
+}
+
+func TestDownloadArticle(t *testing.T) {
+	client, server := setup()
+	defer server.Close()
+	server.QueueResponse(httpmock.Response{
+		ResponseCode: 200,
+		ContentType:  "application/wikitext",
+		Content: `This wiki page contains things
+* [[Work]]
+* [[Finances]]
+* [[Programing]]
+`,
+	})
+	client.loggedIn = true
+	article, err := client.GetArticle("Home Page")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	defer article.Close()
+	bodyBytes, err := ioutil.ReadAll(article)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	body := string(bodyBytes)
+	if body != `This wiki page contains things
+* [[Work]]
+* [[Finances]]
+* [[Programing]]
+` {
+		t.Errorf("Incorrect article body: <%v>", body)
+	}
+
+	requests := server.Requests()
+	request := <-requests
+	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/index.php?action=raw&title=Home+Page" {
 		t.Errorf("Bad call: %v", request)
 	}
 	if len(requests) != 0 {

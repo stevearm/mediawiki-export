@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -17,6 +18,7 @@ type Client struct {
 	loggedIn   bool
 	loginUrl   string
 	listUrl    string
+	articleUrl string
 }
 
 // Create a new api client. It must be logged in with Client.Login() before listing or fetching articles
@@ -29,11 +31,13 @@ func NewClient(host, username, password string) *Client {
 
 	loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", host, username, password)
 	listUrl := fmt.Sprintf("http://%s/api.php?format=json&action=query&list=allpages&aplimit=max", host)
+	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=", host)
 
 	return &Client{
 		httpClient: client,
 		loginUrl:   loginUrl,
 		listUrl:    listUrl,
+		articleUrl: articleUrl,
 	}
 }
 
@@ -118,4 +122,14 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 		titles[i] = response.Query.AllPages[i].Title
 	}
 	return titles, nil
+}
+
+// Get the raw wikitext of an article
+func (c Client) GetArticle(title string) (io.ReadCloser, error) {
+	articleUrl := fmt.Sprintf("%s%s", c.articleUrl, url.QueryEscape(title))
+	resp, err := c.httpClient.Get(articleUrl)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }
