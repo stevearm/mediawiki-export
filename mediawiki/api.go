@@ -13,37 +13,29 @@ import (
 	"github.com/golang/glog"
 )
 
+// An api client. Most commands require that the client has been logged in with Client.Login()
 type Client struct {
+	Host       string
+	Username   string
+	Password   string
 	httpClient *http.Client
 	loggedIn   bool
-	loginUrl   string
-	listUrl    string
-	articleUrl string
 }
 
-// Create a new api client. It must be logged in with Client.Login() before listing or fetching articles
-func NewClient(host, username, password string) *Client {
-	// Setup an http client that manages cookies
-	cookieJar, _ := cookiejar.New(nil)
-	client := &http.Client{
-		Jar: cookieJar,
-	}
-
-	loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", host, username, password)
-	listUrl := fmt.Sprintf("http://%s/api.php?format=json&action=query&list=allpages&aplimit=max", host)
-	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=", host)
-
-	return &Client{
-		httpClient: client,
-		loginUrl:   loginUrl,
-		listUrl:    listUrl,
-		articleUrl: articleUrl,
+func (c *Client) initHttpClient() {
+	if c.httpClient == nil {
+		// Setup an http client that manages cookies
+		cookieJar, _ := cookiejar.New(nil)
+		c.httpClient = &http.Client{
+			Jar: cookieJar,
+		}
 	}
 }
 
 // Ensure the client instance is properly logged in
 func (c *Client) Login() error {
 	if !c.loggedIn {
+		c.initHttpClient()
 		glog.Info("Logging in")
 		type loginResponseInner struct {
 			Result string `json:"result"`
@@ -56,7 +48,8 @@ func (c *Client) Login() error {
 		// Make the first call to get a token
 		glog.V(1).Info("Making 1/2 HTTP calls")
 		values := make(url.Values)
-		res, err := c.httpClient.PostForm(c.loginUrl, values)
+		loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", c.Host, c.Username, c.Password)
+		res, err := c.httpClient.PostForm(loginUrl, values)
 		glog.V(2).Info("Finished 1/2 HTTP calls")
 		if err != nil {
 			return err
@@ -78,7 +71,7 @@ func (c *Client) Login() error {
 		// Do the same call, this time passing back the token
 		values.Set("lgtoken", response.Login.Token)
 		glog.V(1).Info("Making 2/2 HTTP calls")
-		res, err = c.httpClient.PostForm(c.loginUrl, values)
+		res, err = c.httpClient.PostForm(loginUrl, values)
 		glog.V(2).Info("Finished 2/2 HTTP calls")
 		if err != nil {
 			return err
@@ -105,7 +98,8 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 	type result struct {
 		Query query `json:"query"`
 	}
-	res, err := c.httpClient.Get(c.listUrl)
+	listUrl := fmt.Sprintf("http://%s/api.php?format=json&action=query&list=allpages&aplimit=max", c.Host)
+	res, err := c.httpClient.Get(listUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +120,7 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 
 // Get the raw wikitext of an article
 func (c Client) GetArticle(title string) (io.ReadCloser, error) {
-	articleUrl := fmt.Sprintf("%s%s", c.articleUrl, url.QueryEscape(title))
+	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=%s", c.Host, url.QueryEscape(title))
 	resp, err := c.httpClient.Get(articleUrl)
 	if err != nil {
 		return nil, err

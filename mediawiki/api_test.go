@@ -12,7 +12,12 @@ func setup() (*Client, *httpmock.Server) {
 	server := &httpmock.Server{}
 	httpClient := server.Init(httpmock.ErrorResponse())
 
-	client := NewClient("wiki.example.org", "myuser", "mypass")
+	client := &Client{
+		Host:     "wiki.example.org",
+		Username: "myuser",
+		Password: "mypass",
+	}
+	client.initHttpClient()
 	client.httpClient = &http.Client{
 		Jar:       client.httpClient.Jar,
 		Transport: httpClient.Transport,
