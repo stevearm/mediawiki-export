@@ -8,14 +8,14 @@ import (
 	"github.com/stevearm/mediawiki-export/httpmock"
 )
 
-func setup() (*Client, *httpmock.Server) {
+func setup() (Client, *httpmock.Server) {
 	server := &httpmock.Server{}
 	httpClient := server.Init(httpmock.ErrorResponse())
 
-	client := &Client{
-		Host:     "wiki.example.org",
-		Username: "myuser",
-		Password: "mypass",
+	client := &client{
+		host:     "wiki.example.org",
+		username: "myuser",
+		password: "mypass",
 	}
 	client.initHttpClient()
 	client.httpClient = &http.Client{

@@ -14,17 +14,31 @@ import (
 	"github.com/golang/glog"
 )
 
-// An api client. Most commands require that the client has been logged in with Client.Login()
-type Client struct {
-	Host       string
-	Username   string
-	Password   string
+// An api client. Either call Client.Login(), or it will auto-login on first use
+type Client interface {
+	Login() error
+	ListArticleTitles() ([]string, error)
+	GetArticle(title string) (io.ReadCloser, error)
+}
+
+func GetClient(host, username, password string) Client {
+	return &client{
+		host:     host,
+		username: username,
+		password: password,
+	}
+}
+
+type client struct {
+	host       string
+	username   string
+	password   string
 	httpClient *http.Client
 	loginError error
 	authLock   sync.Once
 }
 
-func (c *Client) initHttpClient() {
+func (c *client) initHttpClient() {
 	if c.httpClient == nil {
 		// Setup an http client that manages cookies
 		cookieJar, _ := cookiejar.New(nil)
@@ -34,7 +48,7 @@ func (c *Client) initHttpClient() {
 	}
 }
 
-func (c *Client) login() {
+func (c *client) login() {
 	c.initHttpClient()
 	glog.Info("Logging in")
 	type loginResponseInner struct {
@@ -48,7 +62,7 @@ func (c *Client) login() {
 	// Make the first call to get a token
 	glog.V(1).Info("Making 1/2 HTTP calls")
 	values := make(url.Values)
-	loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", c.Host, c.Username, c.Password)
+	loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", c.host, c.username, c.password)
 	res, err := c.httpClient.PostForm(loginUrl, values)
 	glog.V(2).Info("Finished 1/2 HTTP calls")
 	if err != nil {
@@ -83,13 +97,13 @@ func (c *Client) login() {
 }
 
 // Ensure the client instance is properly logged in
-func (c *Client) Login() error {
+func (c *client) Login() error {
 	c.authLock.Do(c.login)
 	return c.loginError
 }
 
 // Get a list of all the articles contained in the wiki
-func (c *Client) ListArticleTitles() ([]string, error) {
+func (c *client) ListArticleTitles() ([]string, error) {
 	c.authLock.Do(c.login)
 	if c.loginError != nil {
 		return nil, c.loginError
@@ -104,7 +118,7 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 	type result struct {
 		Query query `json:"query"`
 	}
-	listUrl := fmt.Sprintf("http://%s/api.php?format=json&action=query&list=allpages&aplimit=max", c.Host)
+	listUrl := fmt.Sprintf("http://%s/api.php?format=json&action=query&list=allpages&aplimit=max", c.host)
 	res, err := c.httpClient.Get(listUrl)
 	if err != nil {
 		return nil, err
@@ -125,12 +139,12 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 }
 
 // Get the raw wikitext of an article
-func (c Client) GetArticle(title string) (io.ReadCloser, error) {
+func (c client) GetArticle(title string) (io.ReadCloser, error) {
 	c.authLock.Do(c.login)
 	if c.loginError != nil {
 		return nil, c.loginError
 	}
-	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=%s", c.Host, url.QueryEscape(title))
+	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=%s", c.host, url.QueryEscape(title))
 	resp, err := c.httpClient.Get(articleUrl)
 	if err != nil {
 		return nil, err
