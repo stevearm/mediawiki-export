@@ -25,9 +25,7 @@ func setup() (*Client, *httpmock.Server) {
 	return client, server
 }
 
-func TestLogin(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
+func setupLoginResponses(server *httpmock.Server) {
 	server.QueueResponse(httpmock.Response{
 		ResponseCode: 200,
 		ContentType:  "application/json",
@@ -38,12 +36,9 @@ func TestLogin(t *testing.T) {
 		ContentType:  "application/json",
 		Content:      `{"login":{"result":"Done","token":"tokenvalue1234abcd"}}`,
 	})
-	err := client.Login()
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
+}
 
-	requests := server.Requests()
+func checkLoginCalls(t *testing.T, requests <-chan httpmock.Request) {
 	request := <-requests
 	if request.Method != httpmock.PostMethod || request.Url != "http://wiki.example.org/api.php?action=login&lgname=myuser&lgpassword=mypass&format=json" || request.Body != "" {
 		t.Errorf("Bad first call: %v", request)
@@ -52,6 +47,23 @@ func TestLogin(t *testing.T) {
 	if request.Method != httpmock.PostMethod || request.Url != "http://wiki.example.org/api.php?action=login&lgname=myuser&lgpassword=mypass&format=json" || request.Body != "lgtoken=tokenvalue1234abcd" {
 		t.Errorf("Bad first call: %v", request)
 	}
+}
+
+func TestLogin(t *testing.T) {
+	client, server := setup()
+	defer server.Close()
+	setupLoginResponses(server)
+	err := client.Login()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	err = client.Login()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	requests := server.Requests()
+	checkLoginCalls(t, requests)
 	if len(requests) != 0 {
 		t.Errorf("Found extra requests: %v", len(requests))
 	}
@@ -69,6 +81,10 @@ func TestLoginFailure(t *testing.T) {
 	if err == nil {
 		t.Errorf("Should have failed during login")
 	}
+	err = client.Login()
+	if err == nil {
+		t.Errorf("Should have failed during login")
+	}
 }
 
 func TestListWhenUnauthenticated(t *testing.T) {
@@ -83,12 +99,12 @@ func TestListWhenUnauthenticated(t *testing.T) {
 func TestListTitles(t *testing.T) {
 	client, server := setup()
 	defer server.Close()
+	setupLoginResponses(server)
 	server.QueueResponse(httpmock.Response{
 		ResponseCode: 200,
 		ContentType:  "application/json",
 		Content:      `{"query":{"allpages":[{"title":"First article"},{"title":"Second article"}]}}`,
 	})
-	client.loggedIn = true
 	titles, err := client.ListArticleTitles()
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -98,6 +114,7 @@ func TestListTitles(t *testing.T) {
 	}
 
 	requests := server.Requests()
+	checkLoginCalls(t, requests)
 	request := <-requests
 	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/api.php?format=json&action=query&list=allpages&aplimit=max" {
 		t.Errorf("Bad call: %v", request)
@@ -111,6 +128,7 @@ func TestListTitles(t *testing.T) {
 func TestDownloadArticle(t *testing.T) {
 	client, server := setup()
 	defer server.Close()
+	setupLoginResponses(server)
 	server.QueueResponse(httpmock.Response{
 		ResponseCode: 200,
 		ContentType:  "application/wikitext",
@@ -120,7 +138,6 @@ func TestDownloadArticle(t *testing.T) {
 * [[Programing]]
 `,
 	})
-	client.loggedIn = true
 	article, err := client.GetArticle("Home Page")
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -140,6 +157,7 @@ func TestDownloadArticle(t *testing.T) {
 	}
 
 	requests := server.Requests()
+	checkLoginCalls(t, requests)
 	request := <-requests
 	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/index.php?action=raw&title=Home+Page" {
 		t.Errorf("Bad call: %v", request)

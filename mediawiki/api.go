@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"sync"
 
 	"github.com/golang/glog"
 )
@@ -19,7 +20,8 @@ type Client struct {
 	Username   string
 	Password   string
 	httpClient *http.Client
-	loggedIn   bool
+	loginError error
+	authLock   sync.Once
 }
 
 func (c *Client) initHttpClient() {
@@ -32,61 +34,65 @@ func (c *Client) initHttpClient() {
 	}
 }
 
+func (c *Client) login() {
+	c.initHttpClient()
+	glog.Info("Logging in")
+	type loginResponseInner struct {
+		Result string `json:"result"`
+		Token  string `json:"token"`
+	}
+	type loginResponse struct {
+		Login *loginResponseInner `json:"login"`
+	}
+
+	// Make the first call to get a token
+	glog.V(1).Info("Making 1/2 HTTP calls")
+	values := make(url.Values)
+	loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", c.Host, c.Username, c.Password)
+	res, err := c.httpClient.PostForm(loginUrl, values)
+	glog.V(2).Info("Finished 1/2 HTTP calls")
+	if err != nil {
+		c.loginError = err
+		return
+	}
+	defer res.Body.Close()
+	decoder := json.NewDecoder(res.Body)
+	var response loginResponse
+	c.loginError = decoder.Decode(&response)
+	if c.loginError != nil {
+		return
+	}
+	if response.Login == nil {
+		c.loginError = errors.New("Missing login object from response")
+		return
+	}
+	if response.Login.Result != "NeedToken" {
+		c.loginError = errors.New("Did not ask for token")
+		return
+	}
+
+	// Do the same call, this time passing back the token
+	values.Set("lgtoken", response.Login.Token)
+	glog.V(1).Info("Making 2/2 HTTP calls")
+	res, c.loginError = c.httpClient.PostForm(loginUrl, values)
+	glog.V(2).Info("Finished 2/2 HTTP calls")
+	if c.loginError != nil {
+		return
+	}
+	defer res.Body.Close()
+}
+
 // Ensure the client instance is properly logged in
 func (c *Client) Login() error {
-	if !c.loggedIn {
-		c.initHttpClient()
-		glog.Info("Logging in")
-		type loginResponseInner struct {
-			Result string `json:"result"`
-			Token  string `json:"token"`
-		}
-		type loginResponse struct {
-			Login *loginResponseInner `json:"login"`
-		}
-
-		// Make the first call to get a token
-		glog.V(1).Info("Making 1/2 HTTP calls")
-		values := make(url.Values)
-		loginUrl := fmt.Sprintf("http://%s/api.php?action=login&lgname=%s&lgpassword=%s&format=json", c.Host, c.Username, c.Password)
-		res, err := c.httpClient.PostForm(loginUrl, values)
-		glog.V(2).Info("Finished 1/2 HTTP calls")
-		if err != nil {
-			return err
-		}
-		defer res.Body.Close()
-		decoder := json.NewDecoder(res.Body)
-		var response loginResponse
-		err = decoder.Decode(&response)
-		if err != nil {
-			return err
-		}
-		if response.Login == nil {
-			return errors.New("Missing login object from response")
-		}
-		if response.Login.Result != "NeedToken" {
-			return errors.New("Did not ask for token")
-		}
-
-		// Do the same call, this time passing back the token
-		values.Set("lgtoken", response.Login.Token)
-		glog.V(1).Info("Making 2/2 HTTP calls")
-		res, err = c.httpClient.PostForm(loginUrl, values)
-		glog.V(2).Info("Finished 2/2 HTTP calls")
-		if err != nil {
-			return err
-		}
-		defer res.Body.Close()
-
-		c.loggedIn = true
-	}
-	return nil
+	c.authLock.Do(c.login)
+	return c.loginError
 }
 
 // Get a list of all the articles contained in the wiki
 func (c *Client) ListArticleTitles() ([]string, error) {
-	if !c.loggedIn {
-		return nil, errors.New("Client is not logged in")
+	c.authLock.Do(c.login)
+	if c.loginError != nil {
+		return nil, c.loginError
 	}
 	glog.Info("Listing all articles")
 	type page struct {
@@ -120,6 +126,10 @@ func (c *Client) ListArticleTitles() ([]string, error) {
 
 // Get the raw wikitext of an article
 func (c Client) GetArticle(title string) (io.ReadCloser, error) {
+	c.authLock.Do(c.login)
+	if c.loginError != nil {
+		return nil, c.loginError
+	}
 	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=%s", c.Host, url.QueryEscape(title))
 	resp, err := c.httpClient.Get(articleUrl)
 	if err != nil {
