@@ -1,7 +1,6 @@
 package mediawiki
 
 import (
-	"io/ioutil"
 	"net/http"
 	"testing"
 
@@ -142,18 +141,12 @@ func TestDownloadArticle(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	defer article.Close()
-	bodyBytes, err := ioutil.ReadAll(article)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	body := string(bodyBytes)
-	if body != `This wiki page contains things
+	if article != `This wiki page contains things
 * [[Work]]
 * [[Finances]]
 * [[Programing]]
 ` {
-		t.Errorf("Incorrect article body: <%v>", body)
+		t.Errorf("Incorrect article body: <%v>", article)
 	}
 
 	requests := server.Requests()

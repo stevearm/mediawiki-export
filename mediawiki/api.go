@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -18,7 +18,7 @@ import (
 type Client interface {
 	Login() error
 	ListArticleTitles() ([]string, error)
-	GetArticle(title string) (io.ReadCloser, error)
+	GetArticle(title string) (string, error)
 }
 
 func GetClient(host, username, password string) Client {
@@ -139,15 +139,20 @@ func (c *client) ListArticleTitles() ([]string, error) {
 }
 
 // Get the raw wikitext of an article
-func (c client) GetArticle(title string) (io.ReadCloser, error) {
+func (c client) GetArticle(title string) (string, error) {
 	c.authLock.Do(c.login)
 	if c.loginError != nil {
-		return nil, c.loginError
+		return "", c.loginError
 	}
 	articleUrl := fmt.Sprintf("http://%s/index.php?action=raw&title=%s", c.host, url.QueryEscape(title))
 	resp, err := c.httpClient.Get(articleUrl)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return resp.Body, nil
+	defer resp.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(bodyBytes), nil
 }
