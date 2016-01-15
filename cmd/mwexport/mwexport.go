@@ -12,6 +12,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/stevearm/mediawiki-export/mediawiki"
 )
 
 func run() error {
@@ -36,7 +38,7 @@ func run() error {
 		password  = flag.Arg(2)
 		exportDir = flag.Arg(3)
 	)
-	return export(host, username, password, exportDir)
+	return export(mediawiki.GetClient(host, username, password), exportDir, localFileSystem{})
 }
 
 func main() {

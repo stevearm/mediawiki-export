@@ -1,169 +1,71 @@
 package main
 
 import (
-	"io/ioutil"
-	"net/http"
+	"os"
 	"testing"
 
-	"github.com/stevearm/mediawiki-export/httpmock"
+	"github.com/golang/mock/gomock"
+	"github.com/stevearm/mediawiki-export/mediawiki"
 )
 
-func setup() (*Client, *httpmock.Server) {
-	server := &httpmock.Server{}
-	httpClient := server.Init(httpmock.ErrorResponse())
+func TestExport(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
 
-	client := &Client{
-		Host:     "wiki.example.org",
-		Username: "myuser",
-		Password: "mypass",
-	}
-	client.initHttpClient()
-	client.httpClient = &http.Client{
-		Jar:       client.httpClient.Jar,
-		Transport: httpClient.Transport,
-	}
-	return client, server
-}
+	mockClient := mediawiki.NewMockClient(mockCtrl)
+	mockClient.EXPECT().ListArticleTitles().Return([]string{
+		"FirstArticle",
+		"SecondArticle",
+	}, nil)
 
-func setupLoginResponses(server *httpmock.Server) {
-	server.QueueResponse(httpmock.Response{
-		ResponseCode: 200,
-		ContentType:  "application/json",
-		Content:      `{"login":{"result":"NeedToken","token":"tokenvalue1234abcd"}}`,
-	})
-	server.QueueResponse(httpmock.Response{
-		ResponseCode: 200,
-		ContentType:  "application/json",
-		Content:      `{"login":{"result":"Done","token":"tokenvalue1234abcd"}}`,
-	})
-}
+	mockClient.EXPECT().GetArticle("FirstArticle").Return("This is the first article", nil)
+	mockClient.EXPECT().GetArticle("SecondArticle").Return("This is the second article", nil)
 
-func checkLoginCalls(t *testing.T, requests <-chan httpmock.Request) {
-	request := <-requests
-	if request.Method != httpmock.PostMethod || request.Url != "http://wiki.example.org/api.php?action=login&lgname=myuser&lgpassword=mypass&format=json" || request.Body != "" {
-		t.Errorf("Bad first call: %v", request)
-	}
-	request = <-requests
-	if request.Method != httpmock.PostMethod || request.Url != "http://wiki.example.org/api.php?action=login&lgname=myuser&lgpassword=mypass&format=json" || request.Body != "lgtoken=tokenvalue1234abcd" {
-		t.Errorf("Bad first call: %v", request)
-	}
-}
+	mockFileSystem := NewMockfileSystem(mockCtrl)
+	fileMode := os.FileMode(0644)
+	mockFileSystem.EXPECT().WriteFile("FirstArticle.txt", []byte("This is the first article"), fileMode).Return(nil)
+	mockFileSystem.EXPECT().WriteFile("SecondArticle.txt", []byte("This is the second article"), fileMode).Return(nil)
 
-func TestLogin(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
-	setupLoginResponses(server)
-	err := client.Login()
+	err := export(mockClient, "outputFolder", mockFileSystem)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	err = client.Login()
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	requests := server.Requests()
-	checkLoginCalls(t, requests)
-	if len(requests) != 0 {
-		t.Errorf("Found extra requests: %v", len(requests))
-	}
 }
 
-func TestLoginFailure(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
-	server.QueueResponse(httpmock.Response{
-		ResponseCode: 200,
-		ContentType:  "application/json",
-		Content:      `[{"email":"bob@example.com","status":"sent","reject_reason":"hard-bounce","_id":"1"}]`,
-	})
-	err := client.Login()
+func TestDuplicateNames(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockClient := mediawiki.NewMockClient(mockCtrl)
+	mockClient.EXPECT().ListArticleTitles().Return([]string{
+		"FirstArticle",
+		"SecondArticle",
+		"Third One",
+		"Third_One",
+	}, nil)
+
+	err := export(mockClient, "outputFolder", nil)
 	if err == nil {
-		t.Errorf("Should have failed during login")
-	}
-	err = client.Login()
-	if err == nil {
-		t.Errorf("Should have failed during login")
+		t.Errorf("Should have failed on duplicate names")
 	}
 }
 
-func TestListWhenUnauthenticated(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
-	_, err := client.ListArticleTitles()
-	if err == nil {
-		t.Errorf("Should have failed as not authenticated")
+func TestScrubTitle(t *testing.T) {
+	var scrubber scrubber
+	err := scrubber.Init()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
+	assertScrubTitle(t, scrubber, "House", "House")
+	assertScrubTitle(t, scrubber, "OtherHouse", "OtherHouse")
+	assertScrubTitle(t, scrubber, "Other House", "Other_House")
+	assertScrubTitle(t, scrubber, "Other_House", "Other_House")
+	assertScrubTitle(t, scrubber, "Other's House", "Other_s_House")
 }
 
-func TestListTitles(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
-	setupLoginResponses(server)
-	server.QueueResponse(httpmock.Response{
-		ResponseCode: 200,
-		ContentType:  "application/json",
-		Content:      `{"query":{"allpages":[{"title":"First article"},{"title":"Second article"}]}}`,
-	})
-	titles, err := client.ListArticleTitles()
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
+func assertScrubTitle(t *testing.T, scrubber scrubber, source, expected string) {
+	actual := scrubber.Scrub(source)
+	if actual != expected {
+		t.Errorf("Scrub %v to %v failed: %v", source, expected, actual)
 	}
-	if len(titles) != 2 || titles[0] != "First article" || titles[1] != "Second article" {
-		t.Errorf("Wrong titles: %v", titles)
-	}
-
-	requests := server.Requests()
-	checkLoginCalls(t, requests)
-	request := <-requests
-	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/api.php?format=json&action=query&list=allpages&aplimit=max" {
-		t.Errorf("Bad call: %v", request)
-	}
-	if len(requests) != 0 {
-		t.Errorf("Found extra requests: %v", len(requests))
-	}
-
-}
-
-func TestDownloadArticle(t *testing.T) {
-	client, server := setup()
-	defer server.Close()
-	setupLoginResponses(server)
-	server.QueueResponse(httpmock.Response{
-		ResponseCode: 200,
-		ContentType:  "application/wikitext",
-		Content: `This wiki page contains things
-* [[Work]]
-* [[Finances]]
-* [[Programing]]
-`,
-	})
-	article, err := client.GetArticle("Home Page")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	defer article.Close()
-	bodyBytes, err := ioutil.ReadAll(article)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	body := string(bodyBytes)
-	if body != `This wiki page contains things
-* [[Work]]
-* [[Finances]]
-* [[Programing]]
-` {
-		t.Errorf("Incorrect article body: <%v>", body)
-	}
-
-	requests := server.Requests()
-	checkLoginCalls(t, requests)
-	request := <-requests
-	if request.Method != httpmock.GetMethod || request.Url != "http://wiki.example.org/index.php?action=raw&title=Home+Page" {
-		t.Errorf("Bad call: %v", request)
-	}
-	if len(requests) != 0 {
-		t.Errorf("Found extra requests: %v", len(requests))
-	}
-
 }
