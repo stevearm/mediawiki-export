@@ -50,6 +50,19 @@ func TestDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestNoArticles(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockClient := mediawiki.NewMockClient(mockCtrl)
+	mockClient.EXPECT().ListArticleTitles().Return([]string{}, nil)
+
+	err := export(mockClient, "outputFolder", nil)
+	if err == nil {
+		t.Errorf("Should have failed on no names")
+	}
+}
+
 func TestScrubTitle(t *testing.T) {
 	var scrubber scrubber
 	err := scrubber.Init()

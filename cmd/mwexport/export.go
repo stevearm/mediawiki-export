@@ -12,6 +12,9 @@ func export(client mediawiki.Client, exportDir string, fs fileSystem) error {
 	if err != nil {
 		return err
 	}
+	if len(titles) == 0 {
+		return fmt.Errorf("Found 0 articles")
+	}
 	var scrubber scrubber
 	err = scrubber.Init()
 	if err != nil {
