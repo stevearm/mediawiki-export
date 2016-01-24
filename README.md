@@ -10,3 +10,7 @@ This project is released under the Apache 2.0. See attached [LICENCE.txt](https:
 Run it simply with
 
     mwexport wiki.example.org username password export_dir
+
+## Platform support
+Currently used on:
+* ARMv5 (Synology DS411j): Compiled with env GOOS=linux GOARCH=arm GOARM=5 go build
