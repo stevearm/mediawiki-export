@@ -9,4 +9,4 @@ This project is released under the Apache 2.0. See attached [LICENCE.txt](https:
 ## Usage
 Run it simply with
 
-    python export.py wiki.example.org username password export_dir
+    mwexport wiki.example.org username password export_dir
