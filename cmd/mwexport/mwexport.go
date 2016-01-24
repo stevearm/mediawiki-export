@@ -16,6 +16,9 @@ import (
 	"github.com/stevearm/mediawiki-export/mediawiki"
 )
 
+var version string
+var build string
+
 func run() error {
 	flag.Set("logtostderr", "true")
 	flag.Usage = func() {
@@ -25,7 +28,13 @@ func run() error {
 	var flagVersion = flag.Bool("version", false, "show version")
 	flag.Parse()
 	if *flagVersion {
-		fmt.Fprintf(os.Stderr, "mwexport version: 1.0\n")
+		if version == "" {
+			fmt.Fprintf(os.Stderr, "No version found. Rebuild with proper flags:\n")
+			fmt.Fprintf(os.Stderr, "go build -ldflags \"-X 'main.version=1.0' -X 'main.build=$(date -u '+%%Y-%%m-%%d %%H:%%M:%%S')'\"\n")
+		} else {
+			fmt.Printf("mwexport version: %s\n", version)
+			fmt.Printf("         build: %s\n", build)
+		}
 		return nil
 	}
 	if flag.NArg() != 4 {
